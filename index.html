@@ -84,8 +84,9 @@
   </main>
 
   <script>
-    /* Reemplace el texto entre comillas por la URL /exec de su implementación de Google Apps Script. */
-    const URL_APPS_SCRIPT = 'https://script.google.com/macros/s/AKfycby4IB7z8SOR0clIVaJ83h2MXrR0ykuD7K7sXrQFBAWl1dmL0rrgTD18Rk_jvf4YQWIugA/exec';
+    /* IMPORTANTE: pegue aquí la URL /exec de la implementación NUEVA de Código.gs CORREGIDO.
+       No reutilice la URL del formulario anterior: podría apuntar a otro proyecto u otra hoja. */
+    const URL_APPS_SCRIPT = 'https://script.google.com/a/macros/salesiana.edu.co/s/AKfycbwHe504gZjGgPGESVKrSrghHdkGmn7KlH9fhC84fI0cuSVkuxAMXuMOHrzT-5x8YfCC/exec';
     const bloques = [
       {titulo:'1. CALIDAD DEL CONTENIDO Y DISEÑO CURRICULAR',items:[
         ['1.1','Pertinencia y rigor de los temas abordados frente a las necesidades reales de su institución.'],
@@ -117,17 +118,81 @@
     cuerpo.insertAdjacentHTML('beforeend',`<tr><td class="numero">5.3</td><td>¿Recomendaría este diplomado a otros docentes, directivos o mediadores de su red profesional?</td><td colspan="5"><div class="recomendacion"><label><input type="radio" name="recomendaria" value="Sí" required> Sí</label><label><input type="radio" name="recomendaria" value="No" required> No</label></div></td></tr>`);
     document.getElementById('fecha').valueAsDate = new Date();
 
-    document.getElementById('formEvaluacion').addEventListener('submit', async function(event){
+    // El HTML no puede leer la respuesta de un POST no-cors. Por eso se verifica
+    // el ID guardado usando una consulta JSONP antes de mostrar el mensaje de éxito.
+    function consultarConfirmacion(url, id, tiempoLimiteMs = 11000) {
+      return new Promise(resolve => {
+        const nombre = 'confirmacion_' + Math.random().toString(36).slice(2, 15);
+        const etiqueta = document.createElement('script');
+        let terminado = false;
+        const terminar = (respuesta) => {
+          if (terminado) return;
+          terminado = true;
+          clearTimeout(reloj);
+          delete window[nombre];
+          etiqueta.remove();
+          resolve(respuesta);
+        };
+        const reloj = setTimeout(() => terminar(null), tiempoLimiteMs);
+        window[nombre] = respuesta => terminar(respuesta);
+        etiqueta.onerror = () => terminar(null);
+        const parametros = new URLSearchParams({
+          action: 'estado', envio_id: id, callback: nombre, cache: Date.now().toString()
+        });
+        etiqueta.src = url + (url.includes('?') ? '&' : '?') + parametros;
+        document.head.appendChild(etiqueta);
+      });
+    }
+
+    const formulario = document.getElementById('formEvaluacion');
+    let envioPendiente = '';
+    formulario.addEventListener('input', () => { /* Las respuestas no se borran si falla. */ });
+    formulario.addEventListener('submit', async function(event) {
       event.preventDefault();
-      const estado=document.getElementById('estado'); const boton=document.getElementById('btnEnviar');
-      if(URL_APPS_SCRIPT.includes('PEGUE_AQUI')){estado.className='estado error';estado.textContent='Falta configurar la URL de Google Apps Script en el archivo HTML.';return;}
-      boton.disabled=true; boton.textContent='Enviando...'; estado.className='estado';
-      try{
-        await fetch(URL_APPS_SCRIPT,{method:'POST',mode:'no-cors',body:new URLSearchParams(new FormData(this))});
-        estado.className='estado exito'; estado.textContent='¡Evaluación enviada correctamente! Muchas gracias por sus aportes.';
-        this.reset(); document.getElementById('fecha').valueAsDate=new Date();
-      }catch(error){estado.className='estado error';estado.textContent='No fue posible enviar la evaluación. Verifique su conexión e inténtelo nuevamente.';}
-      finally{boton.disabled=false;boton.textContent='Enviar evaluación';}
+      const estado = document.getElementById('estado');
+      const boton = document.getElementById('btnEnviar');
+      const url = URL_APPS_SCRIPT.trim();
+      if (!/^https:\/\/script\.google\.com\/(?:a\/macros\/[^\/]+\/|macros\/)s\/[^\s]+\/exec(?:\?.*)?$/.test(url)) {
+        estado.className = 'estado error';
+        estado.textContent = 'No se ha configurado la dirección de recepción. Solicite al responsable la publicación de Apps Script y la URL /exec nueva.';
+        return;
+      }
+      if (!envioPendiente) {
+        envioPendiente = 'diplomado_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 15);
+      }
+      boton.disabled = true;
+      boton.textContent = 'Verificando registro...';
+      estado.className = 'estado';
+      estado.textContent = 'Estamos registrando su evaluación. No cierre esta ventana.';
+      const datos = new URLSearchParams(new FormData(this));
+      datos.set('envio_id', envioPendiente);
+      try {
+        // Si el navegador no puede verificar la respuesta directamente, consultamos el ID.
+        // La petición opaca no es, por sí misma, una prueba de que los datos se guardaron.
+        await fetch(url, { method:'POST', mode:'no-cors', body:datos });
+        let confirmado = false;
+        for (let intento=0; intento<4; intento++) {
+          await new Promise(resolver => setTimeout(resolver, 850 + intento*500));
+          const verificacion = await consultarConfirmacion(url, envioPendiente, 6000);
+          if (verificacion && verificacion.ok && verificacion.guardado) {
+            confirmado = true;
+            break;
+          }
+        }
+        if (!confirmado) throw new Error('No se pudo confirmar el registro en Google Sheets.');
+        estado.className = 'estado exito';
+        estado.textContent = '¡Evaluación registrada y verificada en Google Sheets! Muchas gracias por sus aportes.';
+        this.reset();
+        envioPendiente = '';
+        document.getElementById('fecha').valueAsDate = new Date();
+      } catch (error) {
+        estado.className = 'estado error';
+        estado.textContent = 'No se confirmó el registro en Google Sheets. Sus respuestas siguen aquí; verifique la conexión con la coordinación antes de intentar nuevamente.';
+        console.error('Registro pendiente de verificación:', error);
+      } finally {
+        boton.disabled = false;
+        boton.textContent = 'Enviar evaluación';
+      }
     });
   </script>
 </body>
