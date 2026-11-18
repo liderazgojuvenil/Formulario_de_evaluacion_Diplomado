@@ -86,7 +86,7 @@
   <script>
     /* IMPORTANTE: pegue aquí la URL /exec de la implementación NUEVA de Código.gs CORREGIDO.
        No reutilice la URL del formulario anterior: podría apuntar a otro proyecto u otra hoja. */
-    const URL_APPS_SCRIPT = 'https://script.google.com/a/macros/salesiana.edu.co/s/AKfycbwHe504gZjGgPGESVKrSrghHdkGmn7KlH9fhC84fI0cuSVkuxAMXuMOHrzT-5x8YfCC/exec';
+    const URL_APPS_SCRIPT = 'https://script.google.com/macros/s/AKfycby2w1rBEq9IavBemIxno417tFEp2FZ67ctGJYb0hgHg67LkLtX2aQ1uFddxskq_lBXf/exec';
     const bloques = [
       {titulo:'1. CALIDAD DEL CONTENIDO Y DISEÑO CURRICULAR',items:[
         ['1.1','Pertinencia y rigor de los temas abordados frente a las necesidades reales de su institución.'],
@@ -167,8 +167,21 @@
       const datos = new URLSearchParams(new FormData(this));
       datos.set('envio_id', envioPendiente);
       try {
-        // Si el navegador no puede verificar la respuesta directamente, consultamos el ID.
-        // La petición opaca no es, por sí misma, una prueba de que los datos se guardaron.
+        // Antes de enviar datos personales, comprobar que la implementación responde
+        // y tiene acceso a la pestaña correcta de Google Sheets.
+        const salud = await consultarConfirmacion(url, envioPendiente, 9000);
+        if (!salud || salud.ok !== true) {
+          throw new Error('NO_CONEXION: La implementación no respondió correctamente. Revise acceso y versión del despliegue.');
+        }
+        if (salud.guardado === true) {
+          estado.className = 'estado exito';
+          estado.textContent = 'Esta evaluación ya está registrada en Google Sheets. No se enviará una copia duplicada.';
+          boton.disabled = false;
+          boton.textContent = 'Enviar evaluación';
+          return;
+        }
+        // Una respuesta de fetch no-cors no verifica que el servidor haya escrito los datos.
+        // Verificamos después el identificador; si el servidor ya guardó, no reenviamos.
         await fetch(url, { method:'POST', mode:'no-cors', body:datos });
         let confirmado = false;
         for (let intento=0; intento<4; intento++) {
@@ -187,8 +200,13 @@
         document.getElementById('fecha').valueAsDate = new Date();
       } catch (error) {
         estado.className = 'estado error';
-        estado.textContent = 'No se confirmó el registro en Google Sheets. Sus respuestas siguen aquí; verifique la conexión con la coordinación antes de intentar nuevamente.';
-        console.error('Registro pendiente de verificación:', error);
+        const detalle = String(error && error.message || 'Error desconocido');
+        if (detalle.startsWith('NO_CONEXION:')) {
+          estado.textContent = 'No se enviaron los datos: Google Apps Script no respondió a la prueba de conexión. Compruebe los permisos de acceso de la aplicación web y que esté publicada la última versión de Código.gs.';
+        } else {
+          estado.textContent = 'No se pudo confirmar si Google Sheets recibió esta evaluación. Sus respuestas permanecen aquí. Antes de reintentar, compruebe en la pestaña «Respuestas» si ya existe una fila con su nombre.';
+        }
+        console.error('Diagnóstico del envío:', detalle);
       } finally {
         boton.disabled = false;
         boton.textContent = 'Enviar evaluación';
